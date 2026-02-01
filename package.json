@@ -1,0 +1,32 @@
+{
+  "name": "fsm-orchestrator",
+  "version": "0.0.1",
+  "description": "A generic state machine orchestrator for managing complex automated workflows.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/riwajp/fsm-orchestrator.git"
+  },
+  "keywords": [
+    "state-machine",
+    "workflow",
+    "orchestrator",
+    "typescript",
+    "automation"
+  ],
+  "author": "Riwaj Prasai riwajprasai03@gmail.com",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "lint": "bun lint",
+    "prepare": "bun run build"
+  }
+}
