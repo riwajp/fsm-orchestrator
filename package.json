@@ -1,6 +1,6 @@
 {
   "name": "fsm-orchestrator",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A generic state machine orchestrator for managing complex automated workflows.",
   "main": "src/index.ts",
   "types": "src/index.ts",
