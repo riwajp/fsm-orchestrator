@@ -28,5 +28,8 @@
     "test": "bun test",
     "lint": "bun lint",
     "prepare": "bun run build"
+  },
+  "dependencies": {
+    "uuid": "^13.0.0"
   }
 }
