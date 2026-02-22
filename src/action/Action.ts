@@ -1,5 +1,5 @@
 import type { Messenger } from "../messaging";
-import type { TCanBeInvoked } from "../types/action";
+import type { IEmitEvent, TCanBeInvoked } from "../types/action";
 import type { IActionLogData } from "../types/logs";
 import type { IState } from "../types/memory";
 
@@ -18,6 +18,8 @@ export class Action {
    */
   public readonly description: string;
 
+  public readonly emitEvent?: IEmitEvent;
+
   /**
    * Function to check if the action can be invoked.
    */
@@ -31,14 +33,6 @@ export class Action {
     messenger?: Messenger<any>,
   ) => Promise<IActionLogData> | IActionLogData;
 
-  /**
-   * Constructs a new Action.
-   * @param key - Unique key for the action.
-   * @param description - Description of the action.
-   * @param transitions - Map of input state key to array of possible output state keys.
-   * @param canBeInvoked - Function to check if action can be invoked.
-   * @param perform - Function to perform the action.
-   */
   constructor(
     key: string,
     description: string,
@@ -47,31 +41,32 @@ export class Action {
       state: IState,
       messenger?: Messenger<any>,
     ) => Promise<IActionLogData> | IActionLogData,
+    emitEvent?: IEmitEvent,
   ) {
     this.key = key;
     this.description = description;
     this._canBeInvoked = canBeInvoked;
     this._perform = perform;
+
+    this.emitEvent = emitEvent;
   }
 
   /**
    * Checks if the action can be performed given the current state.
-   * @param state - The current state.
-   * @returns An object indicating if the action can be performed, and a description if not.
    */
   public canBeInvoked(state: IState): TCanBeInvoked {
     return this._canBeInvoked(state);
   }
 
   /**
-   * Performs the action, given the current state.
-   * @param state - The current state.
-   * @returns The new state after performing the action.
+   * Performs the action.
    */
-  public invoke(
+  public async invoke(
     state: IState,
     messenger?: Messenger<any>,
-  ): Promise<IActionLogData> | IActionLogData {
-    return this._perform(state, messenger);
+  ): Promise<IActionLogData> {
+    const result = await this._perform(state, messenger);
+    result.emitEvent = this.emitEvent;
+    return result;
   }
 }

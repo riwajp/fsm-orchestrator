@@ -1,3 +1,4 @@
+import type { IEmitEvent } from "./action";
 import type { IEvent, IState } from "./memory";
 
 export interface IActionLogData {
@@ -7,6 +8,7 @@ export interface IActionLogData {
   message?: string;
   data?: Record<string, unknown>;
   new_state?: IState;
+  emitEvent?: IEmitEvent;
 }
 
 export interface IInvocationLog {

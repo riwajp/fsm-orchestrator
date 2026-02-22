@@ -72,29 +72,35 @@ export abstract class Orchestrator {
   public async handleEvent(
     taskId: string,
     event: IEvent,
-  ): Promise<IInvocationLog> {
+  ): Promise<IInvocationLog[]> {
+    const current_invocation_logs = [];
+
     const task = this.getTask(taskId);
     if (!task) {
-      return {
-        success: false,
-        message: `Task '${taskId}' not found`,
-        task_id: taskId,
-        event: event,
-        timestamp: new Date().toISOString(),
-      };
+      return [
+        {
+          success: false,
+          message: `Task '${taskId}' not found`,
+          task_id: taskId,
+          event: event,
+          timestamp: new Date().toISOString(),
+        },
+      ];
     }
 
     const workflow = this.getWorkflow(task.workflowKey);
     if (!workflow) {
-      return {
-        success: false,
-        message: `Workflow '${task.workflowKey}' not found for task`,
+      return [
+        {
+          success: false,
+          message: `Workflow '${task.workflowKey}' not found for task`,
 
-        task_id: task.id,
-        event: event,
+          task_id: task.id,
+          event: event,
 
-        timestamp: new Date().toISOString(),
-      };
+          timestamp: new Date().toISOString(),
+        },
+      ];
     }
     workflow.setState(task.state);
 
@@ -111,7 +117,18 @@ export abstract class Orchestrator {
       timestamp: new Date().toISOString(),
     };
     this.logs.push(invocation_log);
+    current_invocation_logs.push(invocation_log);
 
-    return invocation_log;
+    if (result.success && result.action_key && result.emitEvent) {
+      const nextEvent: IEvent = {
+        key: result.emitEvent.key,
+        payload: result.emitEvent.buildPayload?.(result) ?? {},
+      };
+
+      // recursively trigger next event
+      await this.handleEvent(task.id, nextEvent);
+    }
+
+    return current_invocation_logs;
   }
 }
