@@ -4,7 +4,7 @@ import type { IActionLogData } from "../types/logs";
 import type { IState } from "../types/memory";
 
 /**
- * Concrete Action class for defining actions that can be performed
+ * Concrete Action class for defining actions that can be invokeed
  * based on the current state and can transition to one of the allowed output states.
  */
 export class Action {
@@ -18,6 +18,7 @@ export class Action {
    */
   public readonly description: string;
 
+  // Event to emit after the action is invoked.
   public readonly emitEvent?: IEmitEvent;
 
   /**
@@ -26,9 +27,9 @@ export class Action {
   private readonly _canBeInvoked: (state: IState) => TCanBeInvoked;
 
   /**
-   * Function to perform the action.
+   * Function to invoke the action.
    */
-  private readonly _perform: (
+  private readonly _invoke: (
     state: IState,
     messenger?: Messenger<any>,
   ) => Promise<IActionLogData> | IActionLogData;
@@ -37,7 +38,7 @@ export class Action {
     key: string,
     description: string,
     canBeInvoked: (state: IState) => TCanBeInvoked,
-    perform: (
+    invoke: (
       state: IState,
       messenger?: Messenger<any>,
     ) => Promise<IActionLogData> | IActionLogData,
@@ -46,27 +47,28 @@ export class Action {
     this.key = key;
     this.description = description;
     this._canBeInvoked = canBeInvoked;
-    this._perform = perform;
+    this._invoke = invoke;
 
     this.emitEvent = emitEvent;
   }
 
   /**
-   * Checks if the action can be performed given the current state.
+   * Checks if the action can be invokeed given the current state.
    */
   public canBeInvoked(state: IState): TCanBeInvoked {
     return this._canBeInvoked(state);
   }
 
   /**
-   * Performs the action.
+   * invokes the action.
    */
   public async invoke(
     state: IState,
     messenger?: Messenger<any>,
   ): Promise<IActionLogData> {
-    const result = await this._perform(state, messenger);
+    const result = await this._invoke(state, messenger);
     result.emitEvent = this.emitEvent;
+    result.action_key = this.key;
     return result;
   }
 }

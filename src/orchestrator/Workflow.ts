@@ -1,7 +1,8 @@
 import { Action } from "../action/Action";
-import type { IEvent, IState } from "../types/memory";
+import type { IState } from "../types/memory";
 import { Messenger } from "../messaging";
 import type { IActionLogData } from "../types/logs";
+import type { IEvent, IEventAction, ITrigger, TEventKey } from "../types";
 
 export class Workflow {
   public readonly key: string;
@@ -15,16 +16,7 @@ export class Workflow {
   private actions: Map<string, Action> = new Map();
 
   // Map<EventKey, Map<ActionKey, Trigger>>
-  private conditions: Map<
-    string,
-    Map<
-      string,
-      {
-        action: Action;
-        condition: (state: IState, event: IEvent) => boolean;
-      }
-    >
-  > = new Map();
+  private triggers: ITrigger = {};
 
   constructor(key: string, initialStateKey: string, actions: Action[] = []) {
     this.key = key;
@@ -67,22 +59,22 @@ export class Workflow {
   }
 
   public addTrigger(
-    eventKey: string,
+    eventKey: TEventKey,
     action: Action,
     condition: (state: IState, event: IEvent) => boolean,
   ): void {
     this.registerAction(action);
 
-    const eventTriggers = this.conditions.get(eventKey) ?? new Map();
+    const eventActions = this.triggers[eventKey] ?? [];
 
-    if (eventTriggers.has(action.key)) {
+    if (eventActions.find((eventAction:IEventAction) => eventAction.action.key === action.key)) {
       throw new Error(
         `Trigger for action '${action.key}' already exists for event '${eventKey}' in workflow '${this.key}'`,
       );
     }
 
-    eventTriggers.set(action.key, { action, condition });
-    this.conditions.set(eventKey, eventTriggers);
+    eventActions.push( { action, condition });
+    this.triggers[eventKey]=eventActions;
   }
 
   /* ---------- Event Handling ---------- */
@@ -100,9 +92,9 @@ export class Workflow {
       };
     }
 
-    const triggers = this.conditions.get(event.key);
+    const eventActions = this.triggers[event.key] ?? [];
 
-    if (!triggers || triggers.size === 0) {
+    if (!eventActions || eventActions.length === 0) {
       return {
         success: false,
         message: `No triggers registered for event '${event.key}'`,
@@ -111,7 +103,7 @@ export class Workflow {
       };
     }
 
-    for (const { action, condition } of triggers.values()) {
+    for (const { action, condition } of eventActions.values()) {
       if (!condition(this.state, event)) continue;
 
       const canInvoke = action.canBeInvoked(this.state);

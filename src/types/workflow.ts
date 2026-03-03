@@ -1,5 +1,5 @@
 import type { Action } from "../action/Action";
-import type { IEvent, IState } from "./memory";
+import type {  IState } from "./memory";
 
 export type ITask = {
   id: string;
@@ -8,7 +8,20 @@ export type ITask = {
   createdAt: Date;
 };
 
-export type ITrigger = {
+export type TEventKey =string;
+
+export interface IEventAction  {
   action: Action;
   condition: (state: IState, event: IEvent) => boolean;
-};
+}
+// Event type with key and payload
+export interface IEvent {
+  key: TEventKey;
+  payload?: Record<string, any>;
+}
+
+
+export interface ITrigger{
+[eventKey: TEventKey]: IEventAction[];
+
+}

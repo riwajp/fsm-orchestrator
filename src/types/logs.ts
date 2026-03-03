@@ -1,12 +1,13 @@
 import type { IEmitEvent } from "./action";
-import type { IEvent, IState } from "./memory";
+import type {  IState } from "./memory";
+import type { IEvent } from "./workflow";
 
 export interface IActionLogData {
   action_key?: string;
   cost: number;
   success: boolean;
   message?: string;
-  data?: Record<string, unknown>;
+  data?: Record<string, any>;
   new_state?: IState;
   emitEvent?: IEmitEvent;
 }

@@ -20,5 +20,5 @@ export abstract class Messenger<T> {
   }
 
   /** Abstract send method */
-  abstract send(messageKey: string, recipientRoles: string[]): void;
+  abstract send(messageKey: string, recipientRoles: string[]): Promise<void>;
 }

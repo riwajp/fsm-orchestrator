@@ -1,8 +1,8 @@
 import { Messenger } from "../messaging";
 import { v4 as uuidv4 } from "uuid";
 import { Workflow } from "./Workflow";
-import type { IEvent, IState } from "../types/memory";
-import type { ITask } from "../types";
+import type { IState } from "../types/memory";
+import type { IEvent, ITask } from "../types";
 import type { IInvocationLog } from "../types/logs";
 
 export abstract class Orchestrator {
@@ -11,6 +11,18 @@ export abstract class Orchestrator {
   protected workflows: Workflow[] = [];
   protected tasks: ITask[] = [];
   protected logs: IInvocationLog[] = [];
+
+  /**
+   * Persist the current state of a task.
+   * Implementations can store this in any durable medium (DB, file, etc.).
+   */
+  protected abstract persistTaskState(task: ITask): void;
+
+  /**
+   * Persist a single invocation log.
+   * Implementations can store this in any durable medium (DB, file, etc.).
+   */
+  protected abstract persistInvocationLog(log: IInvocationLog): void;
 
   constructor(
     key: string,
@@ -56,6 +68,7 @@ export abstract class Orchestrator {
     };
 
     this.tasks.push(task);
+    this.persistTaskState(task);
     return task;
   }
 
@@ -107,6 +120,7 @@ export abstract class Orchestrator {
     const result = await workflow.handleEvent(event, this.messenger);
     if (result.success) {
       task.state = result.new_state ?? task.state;
+      this.persistTaskState(task);
     }
     const invocation_log: IInvocationLog = {
       action_log_data: result,
@@ -117,6 +131,7 @@ export abstract class Orchestrator {
       timestamp: new Date().toISOString(),
     };
     this.logs.push(invocation_log);
+    this.persistInvocationLog(invocation_log);
     current_invocation_logs.push(invocation_log);
 
     if (result.success && result.action_key && result.emitEvent) {
