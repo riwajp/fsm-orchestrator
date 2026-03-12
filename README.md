@@ -305,6 +305,21 @@ The orchestrator maintains:
 - `logs: IInvocationLog[]` – a history of all action invocations.
 - Optional `messenger?: Messenger<any>` – for side‑effectful communication.
 
+In addition to keeping **in‑memory collections** of tasks and logs, the base `Orchestrator`
+now defines **abstract persistence hooks** that you implement in your subclass:
+
+```ts
+protected abstract persistTaskState(task: ITask): void;
+protected abstract persistInvocationLog(log: IInvocationLog): void;
+```
+
+These are called whenever:
+
+- a task is **created** or its **state changes**, and
+- a new **invocation log** is produced.
+
+You can use them to write to a database, append to a file, publish to an event bus, etc.
+
 #### Workflow management
 
 - **`registerWorkflow(workflow: Workflow)`** – add a workflow.
@@ -566,12 +581,26 @@ The repository includes an example in `examples/procurement/orchestrator.ts`:
 
 ```ts
 import { Orchestrator } from "../../src/orchestrator/Orchestrator";
+import type { IInvocationLog } from "../../src/types/logs";
+import type { ITask } from "../../src/types/workflow";
 import { rfqProcurementWorkflow } from "./workflows";
 
 export class ProcurementOrchestrator extends Orchestrator {
   constructor() {
     // Initialize with all workflows
     super("ProcurementAI", [rfqProcurementWorkflow]);
+  }
+
+  // Example: customize how task state and logs are persisted.
+  // In a real app, you could write to a DB, message bus, etc.
+  protected persistTaskState(task: ITask): void {
+    // e.g. upsert task into a tasks table
+    console.debug("[persistTaskState]", task.id, task.state);
+  }
+
+  protected persistInvocationLog(log: IInvocationLog): void {
+    // e.g. append log to an analytics or audit log sink
+    console.debug("[persistInvocationLog]", log.task_id, log);
   }
 }
 ```

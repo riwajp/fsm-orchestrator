@@ -1,4 +1,5 @@
 import type { Messenger } from "../messaging";
+import type { IEvent } from "../types";
 import type { IEmitEvent, TCanBeInvoked } from "../types/action";
 import type { IActionLogData } from "../types/logs";
 import type { IState } from "../types/memory";
@@ -31,6 +32,8 @@ export class Action {
    */
   private readonly _invoke: (
     state: IState,
+    taskId?: string,
+    event?: IEvent,
     messenger?: Messenger<any>,
   ) => Promise<IActionLogData> | IActionLogData;
 
@@ -40,6 +43,8 @@ export class Action {
     canBeInvoked: (state: IState) => TCanBeInvoked,
     invoke: (
       state: IState,
+      taskId?: string,
+      event?: IEvent,
       messenger?: Messenger<any>,
     ) => Promise<IActionLogData> | IActionLogData,
     emitEvent?: IEmitEvent,
@@ -64,9 +69,11 @@ export class Action {
    */
   public async invoke(
     state: IState,
+    taskId?: string,
+    event?: IEvent,
     messenger?: Messenger<any>,
   ): Promise<IActionLogData> {
-    const result = await this._invoke(state, messenger);
+    const result = await this._invoke(state, taskId, event, messenger);
     result.emitEvent = this.emitEvent;
     result.action_key = this.key;
     return result;

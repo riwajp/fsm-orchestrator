@@ -1,5 +1,5 @@
 import { Messenger } from "../messaging";
-import { v4 as uuidv4 } from "uuid";
+import { randomUUID } from "crypto";
 import { Workflow } from "./Workflow";
 import type { IState } from "../types/memory";
 import type { IEvent, ITask } from "../types";
@@ -50,10 +50,10 @@ export abstract class Orchestrator {
 
   /* ---------- Task Management ---------- */
 
-  public initTask(
+  public async initTask(
     workflowKey: string,
     initialData?: Record<string, any>,
-  ): ITask {
+  ): Promise<ITask> {
     const workflow = this.getWorkflow(workflowKey);
     if (!workflow) throw new Error(`Workflow '${workflowKey}' not found`);
 
@@ -61,22 +61,22 @@ export abstract class Orchestrator {
     workflow.initState();
 
     const task: ITask = {
-      id: uuidv4(),
+      id: randomUUID(),
       workflowKey: workflow.key,
       state: workflow.getState()!,
       createdAt: new Date(),
     };
 
     this.tasks.push(task);
-    this.persistTaskState(task);
+    await this.persistTaskState(task);
     return task;
   }
 
-  public getTasks(): ITask[] {
+  public async getTasks(): Promise<ITask[]> {
     return this.tasks;
   }
 
-  public getTask(taskId: string): ITask | undefined {
+  public async getTask(taskId: string): Promise<ITask | undefined | null> {
     return this.tasks.find((t) => t.id === taskId);
   }
 
@@ -88,7 +88,7 @@ export abstract class Orchestrator {
   ): Promise<IInvocationLog[]> {
     const current_invocation_logs = [];
 
-    const task = this.getTask(taskId);
+    const task = await this.getTask(taskId);
     if (!task) {
       return [
         {
@@ -115,12 +115,13 @@ export abstract class Orchestrator {
         },
       ];
     }
+    workflow.setTaskId(taskId);
     workflow.setState(task.state);
 
     const result = await workflow.handleEvent(event, this.messenger);
     if (result.success) {
       task.state = result.new_state ?? task.state;
-      this.persistTaskState(task);
+      await this.persistTaskState(task);
     }
     const invocation_log: IInvocationLog = {
       action_log_data: result,

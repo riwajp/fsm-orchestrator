@@ -7,5 +7,5 @@ export type TCanBeInvoked = { can: boolean; description: string };
 
 export type IEmitEvent = {
   key: string;
-  buildPayload: (log: IActionLogData) => any;
+  buildPayload?: (log: IActionLogData) => any;
 };

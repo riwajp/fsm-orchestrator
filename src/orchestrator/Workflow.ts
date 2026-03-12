@@ -7,7 +7,7 @@ import type { IEvent, IEventAction, ITrigger, TEventKey } from "../types";
 export class Workflow {
   public readonly key: string;
   public readonly initialStateKey: string;
-
+  private taskId?: string;
   private state?: IState;
 
   private initialStateData: Record<string, unknown> = {};
@@ -61,20 +61,24 @@ export class Workflow {
   public addTrigger(
     eventKey: TEventKey,
     action: Action,
-    condition: (state: IState, event: IEvent) => boolean,
+    condition?: (state: IState, event: IEvent) => boolean,
   ): void {
     this.registerAction(action);
 
     const eventActions = this.triggers[eventKey] ?? [];
 
-    if (eventActions.find((eventAction:IEventAction) => eventAction.action.key === action.key)) {
+    if (
+      eventActions.find(
+        (eventAction: IEventAction) => eventAction.action.key === action.key,
+      )
+    ) {
       throw new Error(
         `Trigger for action '${action.key}' already exists for event '${eventKey}' in workflow '${this.key}'`,
       );
     }
 
-    eventActions.push( { action, condition });
-    this.triggers[eventKey]=eventActions;
+    eventActions.push({ action, condition: condition ?? undefined });
+    this.triggers[eventKey] = eventActions;
   }
 
   /* ---------- Event Handling ---------- */
@@ -104,13 +108,18 @@ export class Workflow {
     }
 
     for (const { action, condition } of eventActions.values()) {
-      if (!condition(this.state, event)) continue;
+      if (condition && !condition(this.state, event)) continue;
 
       const canInvoke = action.canBeInvoked(this.state);
       if (!canInvoke.can) continue;
 
       try {
-        const result = await action.invoke(this.state, messenger);
+        const result = await action.invoke(
+          this.state,
+          this.taskId,
+          event,
+          messenger,
+        );
 
         if (result.success) {
           this.state = result.new_state;
@@ -119,6 +128,7 @@ export class Workflow {
         return result;
       } catch (err: any) {
         return {
+          action_key: action.key,
           success: false,
           message: err?.message ?? "Action execution failed",
           cost: 0,
@@ -137,5 +147,12 @@ export class Workflow {
 
   public getActions(): Action[] {
     return Array.from(this.actions.values());
+  }
+
+  public setTaskId(taskId: string): void {
+    this.taskId = taskId;
+  }
+  public getTaskId(): string | undefined {
+    return this.taskId;
   }
 }
