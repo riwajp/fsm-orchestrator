@@ -49,7 +49,10 @@ export class Workflow {
   /* ---------- Actions ---------- */
 
   public registerAction(action: Action): void {
-    if (this.actions.has(action.key)) {
+    const existing = this.actions.get(action.key);
+    if (existing) {
+      // Allow re-registration of the same instance (same action, multiple triggers)
+      if (existing === action) return;
       throw new Error(
         `Action '${action.key}' is already registered in workflow '${this.key}'`,
       );
@@ -83,19 +86,20 @@ export class Workflow {
 
   /* ---------- Event Handling ---------- */
 
+  /**
+   * Handle an event against the given state.
+   *
+   * State and taskId are passed as arguments (not stored on the instance)
+   * so that concurrent tasks don't corrupt each other.
+   */
   public async handleEvent(
     event: IEvent,
+    localState: IState,
+    globalState: IState,
+    taskId?: string,
+    subtaskId?: string,
     messenger?: Messenger<any>,
   ): Promise<IActionLogData> {
-    if (!this.state) {
-      return {
-        success: false,
-        message: "Invalid state",
-        cost: 0,
-        data: {},
-      };
-    }
-
     const eventActions = this.triggers[event.key] ?? [];
 
     if (!eventActions || eventActions.length === 0) {
@@ -108,22 +112,20 @@ export class Workflow {
     }
 
     for (const { action, condition } of eventActions.values()) {
-      if (condition && !condition(this.state, event)) continue;
+      if (condition && !condition(localState, globalState, event)) continue;
 
-      const canInvoke = action.canBeInvoked(this.state);
+      const canInvoke = action.canBeInvoked(localState, globalState);
       if (!canInvoke.can) continue;
 
       try {
         const result = await action.invoke(
-          this.state,
-          this.taskId,
+          localState,
+          globalState,
+          taskId,
+          subtaskId,
           event,
           messenger,
         );
-
-        if (result.success) {
-          this.state = result.new_state;
-        }
 
         return result;
       } catch (err: any) {

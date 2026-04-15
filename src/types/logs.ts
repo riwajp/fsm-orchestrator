@@ -9,7 +9,11 @@ export interface IActionLogData {
   message?: string;
   data?: Record<string, any>;
   new_state?: IState;
+  new_global_state?: IState;
+  spawn_subtask?: { workflowKey: string; initialData?: Record<string, any> };
+  end_subtask?: boolean;
   emitEvent?: IEmitEvent;
+  learningData?: { key: string; data: any };
 }
 
 export interface IInvocationLog {

@@ -25,14 +25,19 @@ export class Action {
   /**
    * Function to check if the action can be invoked.
    */
-  private readonly _canBeInvoked: (state: IState) => TCanBeInvoked;
+  private readonly _canBeInvoked: (
+    localState: IState,
+    globalState: IState,
+  ) => TCanBeInvoked;
 
   /**
    * Function to invoke the action.
    */
   private readonly _invoke: (
-    state: IState,
+    localState: IState,
+    globalState: IState,
     taskId?: string,
+    subtaskId?: string,
     event?: IEvent,
     messenger?: Messenger<any>,
   ) => Promise<IActionLogData> | IActionLogData;
@@ -40,10 +45,12 @@ export class Action {
   constructor(
     key: string,
     description: string,
-    canBeInvoked: (state: IState) => TCanBeInvoked,
+    canBeInvoked: (localState: IState, globalState: IState) => TCanBeInvoked,
     invoke: (
-      state: IState,
+      localState: IState,
+      globalState: IState,
       taskId?: string,
+      subtaskId?: string,
       event?: IEvent,
       messenger?: Messenger<any>,
     ) => Promise<IActionLogData> | IActionLogData,
@@ -60,21 +67,30 @@ export class Action {
   /**
    * Checks if the action can be invokeed given the current state.
    */
-  public canBeInvoked(state: IState): TCanBeInvoked {
-    return this._canBeInvoked(state);
+  public canBeInvoked(localState: IState, globalState: IState): TCanBeInvoked {
+    return this._canBeInvoked(localState, globalState);
   }
 
   /**
    * invokes the action.
    */
   public async invoke(
-    state: IState,
+    localState: IState,
+    globalState: IState,
     taskId?: string,
+    subtaskId?: string,
     event?: IEvent,
     messenger?: Messenger<any>,
   ): Promise<IActionLogData> {
-    const result = await this._invoke(state, taskId, event, messenger);
-    result.emitEvent = this.emitEvent;
+    const result = await this._invoke(
+      localState,
+      globalState,
+      taskId,
+      subtaskId,
+      event,
+      messenger,
+    );
+    result.emitEvent = result.emitEvent ?? this.emitEvent;
     result.action_key = this.key;
     return result;
   }

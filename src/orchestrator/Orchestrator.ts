@@ -2,7 +2,7 @@ import { Messenger } from "../messaging";
 import { randomUUID } from "crypto";
 import { Workflow } from "./Workflow";
 import type { IState } from "../types/memory";
-import type { IEvent, ITask } from "../types";
+import type { IEvent, ITask, ISubtask } from "../types";
 import type { IInvocationLog } from "../types/logs";
 
 export abstract class Orchestrator {
@@ -23,6 +23,12 @@ export abstract class Orchestrator {
    * Implementations can store this in any durable medium (DB, file, etc.).
    */
   protected abstract persistInvocationLog(log: IInvocationLog): void;
+
+  /**
+   * Handle learning data returned by actions.
+   * Implementations should handle DB updates, fetching learning, etc.
+   */
+  protected abstract learn(learningData: { key: string; data: any }): void | Promise<void>;
 
   constructor(
     key: string,
@@ -51,25 +57,49 @@ export abstract class Orchestrator {
   /* ---------- Task Management ---------- */
 
   public async initTask(
-    workflowKey: string,
-    initialData?: Record<string, any>,
+    taskInitialData: Record<string, any>,
+    subtaskWorkflowKey: string,
+    subtaskInitialData?: Record<string, any>,
   ): Promise<ITask> {
-    const workflow = this.getWorkflow(workflowKey);
-    if (!workflow) throw new Error(`Workflow '${workflowKey}' not found`);
+    const workflow = this.getWorkflow(subtaskWorkflowKey);
+    if (!workflow)
+      throw new Error(`Workflow '${subtaskWorkflowKey}' not found`);
 
-    if (initialData) workflow.setInitialStateData(initialData);
-    workflow.initState();
+    const taskId = randomUUID();
+    const globalState: IState = {
+      key: "initial",
+      data: taskInitialData,
+    };
+
+    const initialSubtask: ISubtask = {
+      id: randomUUID(),
+      workflowKey: subtaskWorkflowKey,
+      localState: {
+        key: workflow.initialStateKey,
+        data: subtaskInitialData ?? {},
+      },
+      createdAt: new Date(),
+      status: "active",
+    };
 
     const task: ITask = {
-      id: randomUUID(),
-      workflowKey: workflow.key,
-      state: workflow.getState()!,
+      id: taskId,
+      globalState: globalState,
+      subtasks: [initialSubtask],
       createdAt: new Date(),
     };
 
     this.tasks.push(task);
     await this.persistTaskState(task);
     return task;
+  }
+
+  /**
+   * Persist a task's current state to durable storage.
+   * Useful when task data is mutated outside of handleEvent.
+   */
+  public async persistTask(task: ITask): Promise<void> {
+    await this.persistTaskState(task);
   }
 
   public async getTasks(): Promise<ITask[]> {
@@ -80,10 +110,17 @@ export abstract class Orchestrator {
     return this.tasks.find((t) => t.id === taskId);
   }
 
+  public async listActiveSubtasks(taskId: string): Promise<ISubtask[]> {
+    const task = await this.getTask(taskId);
+    if (!task) throw new Error(`Task '${taskId}' not found`);
+    return task.subtasks.filter((s) => s.status === "active");
+  }
+
   /* ---------- Event Handling ---------- */
 
   public async handleEvent(
     taskId: string,
+    subtaskId: string,
     event: IEvent,
   ): Promise<IInvocationLog[]> {
     const current_invocation_logs = [];
@@ -101,36 +138,100 @@ export abstract class Orchestrator {
       ];
     }
 
-    const workflow = this.getWorkflow(task.workflowKey);
-    if (!workflow) {
+    const subtask = task.subtasks.find((s) => s.id === subtaskId);
+    if (!subtask) {
       return [
         {
           success: false,
-          message: `Workflow '${task.workflowKey}' not found for task`,
-
-          task_id: task.id,
+          message: `Subtask '${subtaskId}' not found in task '${taskId}'`,
+          task_id: taskId,
           event: event,
-
           timestamp: new Date().toISOString(),
         },
       ];
     }
-    workflow.setTaskId(taskId);
-    workflow.setState(task.state);
 
-    const result = await workflow.handleEvent(event, this.messenger);
+    if (subtask.status !== "active") {
+      return [
+        {
+          success: false,
+          message: `Subtask '${subtaskId}' is already completed`,
+          task_id: taskId,
+          event: event,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+    }
+
+    const workflow = this.getWorkflow(subtask.workflowKey);
+    if (!workflow) {
+      return [
+        {
+          success: false,
+          message: `Workflow '${subtask.workflowKey}' not found for subtask`,
+          task_id: task.id,
+          event: event,
+          timestamp: new Date().toISOString(),
+        },
+      ];
+    }
+
+    const result = await workflow.handleEvent(
+      event,
+      subtask.localState,
+      task.globalState,
+      task.id,
+      subtask.id,
+      this.messenger,
+    );
+
     if (result.success) {
-      task.state = result.new_state ?? task.state;
+      // Update local state
+      subtask.localState = result.new_state ?? subtask.localState;
+
+      // Update global state if provided
+      if (result.new_global_state) {
+        task.globalState = result.new_global_state;
+      }
+
+      // Handle subtask termination
+      if (result.end_subtask) {
+        subtask.status = "completed";
+      }
+
+      // Handle subtask spawning
+      if (result.spawn_subtask) {
+        const spawnWorkflow = this.getWorkflow(result.spawn_subtask.workflowKey);
+        if (spawnWorkflow) {
+          const newSubtask: ISubtask = {
+            id: randomUUID(),
+            workflowKey: spawnWorkflow.key,
+            localState: {
+              key: spawnWorkflow.initialStateKey,
+              data: result.spawn_subtask.initialData ?? {},
+            },
+            createdAt: new Date(),
+            status: "active",
+          };
+          task.subtasks.push(newSubtask);
+        }
+      }
+
       await this.persistTaskState(task);
     }
+
+    if (result.learningData) {
+      await this.learn(result.learningData);
+    }
+
     const invocation_log: IInvocationLog = {
       action_log_data: result,
       task_id: task.id,
       event: event,
       success: !!result.action_key,
-
       timestamp: new Date().toISOString(),
     };
+
     this.logs.push(invocation_log);
     this.persistInvocationLog(invocation_log);
     current_invocation_logs.push(invocation_log);
@@ -142,7 +243,10 @@ export abstract class Orchestrator {
       };
 
       // recursively trigger next event
-      await this.handleEvent(task.id, nextEvent);
+      // Note: We recursively trigger on the SAME subtask.
+      // If the action spawned a new subtask, events for that subtask should be handled separately
+      // unless we want to support targetting subtasks in emitEvent.
+      await this.handleEvent(task.id, subtask.id, nextEvent);
     }
 
     return current_invocation_logs;

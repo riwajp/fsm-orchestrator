@@ -1,10 +1,18 @@
 import type { Action } from "../action/Action";
 import type { IState } from "./memory";
 
-export type ITask = {
+export type ISubtask = {
   id: string;
   workflowKey: string;
-  state: IState;
+  localState: IState;
+  createdAt: Date;
+  status: "active" | "completed";
+};
+
+export type ITask = {
+  id: string;
+  globalState: IState;
+  subtasks: ISubtask[];
   createdAt: Date;
 };
 
@@ -12,7 +20,7 @@ export type TEventKey = string;
 
 export interface IEventAction {
   action: Action;
-  condition?: (state: IState, event: IEvent) => boolean;
+  condition?: (localState: IState, globalState: IState, event: IEvent) => boolean;
 }
 // Event type with key and payload
 export interface IEvent {
