@@ -4,8 +4,14 @@ import { Messenger } from "../messaging";
 import type { IActionLogData } from "../types/logs";
 import type { IEvent, IEventAction, ITrigger, TEventKey } from "../types";
 
+/**
+ * Represents a state-machine based workflow for a specific subtask type.
+ * A Workflow defines how actions are triggered by events based on current state.
+ */
 export class Workflow {
+  /** Unique identifier for the workflow */
   public readonly key: string;
+  /** The key of the state where a subtask of this workflow begins */
   public readonly initialStateKey: string;
   private taskId?: string;
   private state?: IState;

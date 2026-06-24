@@ -4,16 +4,26 @@ A state-based workflow orchestration library for managing complex business proce
 
 ## Core Concepts
 
-### 🎯 Tasks
+#### 🎯 Tasks
 
-Tasks represent individual instances of a workflow that contain state and evolve over time.
+Tasks represent individual instances of a workflow. In this version, tasks are hierarchical:
+- **Task**: The root container holding `globalState` (shared across all subtasks) and an array of `subtasks`.
+- **Subtask**: A specific execution unit within a task with its own `localState` and `workflowKey`.
 
 ```typescript
 interface ITask {
   id: string; // Unique identifier
-  workflowKey: string; // Which workflow this task belongs to
-  state: IState; // Current state and data
-  createdAt: Date; // When the task was created
+  globalState: IState; // Shared state
+  subtasks: ISubtask[]; // Collection of active/completed subtasks
+  createdAt: Date;
+}
+
+interface ISubtask {
+  id: string;
+  workflowKey: string;
+  localState: IState; // Isolated state for this subtask
+  createdAt: Date;
+  status: "active" | "completed";
 }
 ```
 
@@ -30,43 +40,41 @@ interface IState {
 
 ### 📋 Workflows
 
-Workflows define the sequence of states and actions that can be executed.
+Workflows define the logic for a specific type of subtask.
 
 ```typescript
 class Workflow {
-  key: string; // Unique workflow identifier
-  initialStateKey: string; // Starting state key
+  key: string;
+  initialStateKey: string;
 
-  // Methods
-  registerAction(action: Action): void;
   addTrigger(eventKey, action, condition?): void;
-  handleEvent(event, messenger?): Promise<IActionLogData>;
+  handleEvent(event, localState, globalState, ...): Promise<IActionLogData>;
 }
 ```
 
 ### ⚡ Actions
 
-Actions are atomic operations that can be executed when conditions are met.
+Actions are atomic operations that interact with local and global states.
 
 ```typescript
 class Action {
-  key: string; // Unique action identifier
-  description: string; // Human-readable description
+  key: string;
+  description: string;
 
-  // Methods
-  canBeInvoked(state: IState): TCanBeInvoked;
-  invoke(state, taskId?, event?, messenger?): Promise<IActionLogData>;
+  // Now receives both local and global state
+  canBeInvoked(localState: IState, globalState: IState): TCanBeInvoked;
+  invoke(localState, globalState, taskId?, subtaskId?, event?, messenger?): Promise<IActionLogData>;
 }
 ```
 
 ### 📡 Events
 
-Events trigger actions and can carry payloads.
+Events trigger actions on subtasks.
 
 ```typescript
 interface IEvent {
-  key: TEventKey; // Event identifier
-  payload?: Record<string, any>; // Optional event data
+  key: TEventKey;
+  payload?: Record<string, any>;
 }
 ```
 
@@ -90,63 +98,65 @@ class Message<T> {
 
 ### 1. Create a Workflow
 
+Follow the pattern of defining parameters as variables first.
+
 ```typescript
-import { Orchestrator, Action, Workflow } from "./lib";
+import { Action, Workflow } from "./lib";
 
-const myWorkflow = new Workflow("user-onboarding", "awaiting_verification", [
-  // Define actions
-  new Action(
-    "send_verification_email",
-    "Sends verification email to user",
-    (state) => state.key === "awaiting_verification",
-    async (state) => {
-      // Action logic here
-      await sendEmail(state.data.email);
-
-      return {
-        success: true,
-        message: "Verification email sent",
-        new_state: {
-          key: "verification_sent",
-          data: { ...state.data, sentAt: new Date() },
-        },
-      };
+// Define the action
+const actionKey = "send_verification_email";
+const actionDesc = "Sends verification email to user";
+const canInvoke = (local) => local.key === "awaiting_verification";
+const invoke = async (local, global) => {
+  await sendEmail(local.data.email);
+  return {
+    success: true,
+    new_state: {
+      key: "verification_sent",
+      data: { ...local.data, sentAt: new Date() },
     },
-    { key: "verification_sent" }, // Event to emit
-  ),
-]);
+  };
+};
 
-// Add triggers
+const sendVerificationAction = new Action(actionKey, actionDesc, canInvoke, invoke);
+
+// Create the workflow
+const wfKey = "user-onboarding";
+const initial = "awaiting_verification";
+const actions = [sendVerificationAction];
+
+const myWorkflow = new Workflow(wfKey, initial, actions);
 myWorkflow.addTrigger("user_registered", sendVerificationAction);
 ```
 
 ### 2. Create an Orchestrator
 
 ```typescript
-const orchestrator = new MyOrchestrator(
-  "user-management",
-  [myWorkflow],
-  emailMessenger, // Optional: for external messaging
-);
+const key = "user-management";
+const workflows = [myWorkflow];
+const messenger = emailMessenger;
 
-// Register workflow
-orchestrator.registerWorkflow(myWorkflow);
+const orchestrator = new MyOrchestrator(key, workflows, messenger);
 ```
 
 ### 3. Initialize a Task
 
+Initializes a task with a starting subtask.
+
 ```typescript
-const task = await orchestrator.initTask("user-onboarding", {
-  email: "user@example.com",
-  name: "John Doe",
-  registrationDate: new Date().toISOString(),
-});
+const task = await orchestrator.initTask(
+  { systemId: "123" }, // Task global data
+  "user-onboarding",   // Initial subtask workflow
+  { email: "user@example.com" } // Initial subtask data
+);
 ```
 
 ### 4. Handle Events
 
+Requires both `taskId` and `subtaskId`.
+
 ```typescript
-const logs = await orchestrator.handleEvent(task.id, {
+const logs = await orchestrator.handleEvent(task.id, task.subtasks[0].id, {
   key: "email_verified",
   payload: { verifiedAt: new Date().toISOString() },
 });
@@ -154,94 +164,44 @@ const logs = await orchestrator.handleEvent(task.id, {
 
 ## Advanced Examples
 
-### Conditional Triggers
+### Subtask Spawning and Ending
+
+Actions can now control subtask lifecycles:
 
 ```typescript
-myWorkflow.addTrigger("user_action", sendPromoAction, (state, event) => {
-  // Only send promo if user is active and hasn't received one recently
-  return (
-    (state.data.isActive && !state.data.lastPromoDate) ||
-    new Date(event.payload.lastPromoDate) >
-      new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-  );
-});
-```
-
-### Complex State Management
-
-```typescript
-const complexAction = new Action(
-  "process_order",
-  "Processes customer order with inventory check",
-  (state) => state.key === "order_received",
-  async (state) => {
-    const { orderId, items } = state.data;
-
-    // Check inventory
-    const inventory = await checkInventory(items);
-
-    if (inventory.available) {
-      return {
-        success: true,
-        message: "Order processed successfully",
-        cost: calculateCost(items),
-        new_state: {
-          key: "order_processed",
-          data: {
-            ...state.data,
-            processedAt: new Date(),
-            inventoryReserved: inventory.reserved,
-            totalCost: inventory.cost,
-          },
-        },
-      };
-    } else {
-      return {
-        success: false,
-        message: "Insufficient inventory",
-        new_state: {
-          key: "order_failed",
-          data: {
-            ...state.data,
-            failureReason: "insufficient_inventory",
-            failedAt: new Date(),
-          },
-        },
-      };
-    }
-  },
-  { key: "order_processed" },
+const spawnAction = new Action(
+  "spawn_child",
+  "Spawns a new subtask",
+  () => ({ can: true }),
+  async (local, global) => {
+    return {
+      success: true,
+      spawn_subtask: {
+        workflowKey: "child-workflow",
+        initialData: { parentInfo: local.data.id }
+      },
+      // end_subtask: true // To complete the current subtask
+    };
+  }
 );
 ```
 
-### Custom Messenger Implementation
+### Global State Updates
 
 ```typescript
-class EmailMessenger extends Messenger<EmailPayload> {
-  constructor(private emailService: EmailService) {
-    super(["customer", "admin"]);
+const updateGlobalAction = new Action(
+  "update_global",
+  "Updates shared global state",
+  () => ({ can: true }),
+  async (local, global) => {
+    return {
+      success: true,
+      new_global_state: {
+        ...global,
+        data: { ...global.data, sharedValue: "updated" }
+      }
+    };
   }
-
-  async send(messageKey: string, recipientRoles: string[]): Promise<void> {
-    const message = this.getMessage(messageKey);
-    if (!message) throw new Error(`Message ${messageKey} not found`);
-
-    for (const role of recipientRoles) {
-      await this.emailService.send({
-        to: this.getRecipientsForRole(role),
-        subject: message.message.subject,
-        body: message.message.body,
-      });
-    }
-  }
-}
-
-// Register custom messages
-emailMessenger.registerMessage(
-  new Message("welcome_email", {
-    subject: "Welcome!",
-    body: "Thanks for joining!",
-  }),
 );
 ```
 
@@ -318,25 +278,6 @@ interface IState {
     verificationToken?: string;
   };
 }
-
-// Avoid
-interface IState {
-  key: string;
-  data: {
-    user: {
-      personal: {
-        contact: {
-          email: string;
-          phone: string;
-        };
-        preferences: {
-          notifications: boolean;
-          theme: "light" | "dark";
-        };
-      };
-    };
-  };
-}
 ```
 
 ### 2. Action Design
@@ -346,72 +287,11 @@ interface IState {
 - Handle all error cases
 - Use descriptive messages
 
-```typescript
-// Good action design
-const action = new Action(
-  "send_notification",
-  "Sends notification to user",
-  (state) => state.key === "ready_to_notify",
-  async (state) => {
-    const result = await notificationService.send({
-      recipient: state.data.userId,
-      message: state.data.message,
-      type: state.data.notificationType,
-    });
-
-    return {
-      success: result.success,
-      message: result.success
-        ? "Notification sent successfully"
-        : `Failed to send: ${result.error}`,
-      cost: result.cost || 0,
-      new_state: result.success
-        ? {
-            key: "notification_sent",
-            data: {
-              ...state.data,
-              sentAt: new Date(),
-              notificationId: result.id,
-            },
-          }
-        : {
-            key: "notification_failed",
-            data: {
-              ...state.data,
-              error: result.error,
-              failedAt: new Date(),
-            },
-          },
-    };
-  },
-);
-```
-
 ### 3. Event Design
 
 - Use descriptive event keys
 - Include relevant payload data
 - Document event purposes
-
-```typescript
-// Good event design
-const events = {
-  USER_REGISTERED: "user_registered",
-  EMAIL_VERIFIED: "email_verified",
-  ORDER_PLACED: "order_placed",
-  PAYMENT_PROCESSED: "payment_processed",
-};
-
-// With payloads
-await orchestrator.handleEvent(taskId, {
-  key: events.USER_REGISTERED,
-  payload: {
-    userId: "user_123",
-    email: "user@example.com",
-    registrationSource: "web",
-  },
-});
-```
 
 ### 4. Testing
 
@@ -419,29 +299,6 @@ await orchestrator.handleEvent(taskId, {
 - Test workflow transitions
 - Mock external dependencies
 - Test error scenarios
-
-```typescript
-// Example test
-describe("User Onboarding Workflow", () => {
-  let task: ITask;
-
-  beforeEach(async () => {
-    task = await orchestrator.initTask("user-onboarding", {
-      email: "test@example.com",
-    });
-  });
-
-  it("should send verification email", async () => {
-    const result = await orchestrator.handleEvent(task.id, {
-      key: "user_registered",
-    });
-
-    expect(result).toHaveLength(1);
-    expect(result[0].success).toBe(true);
-    expect(result[0].action_log_data?.new_state?.key).toBe("verification_sent");
-  });
-});
-```
 
 ## Architecture Patterns
 
@@ -468,11 +325,11 @@ Use events for commands (state changes) and separate queries for state inspectio
 
 ```typescript
 // Commands (change state)
-await orchestrator.handleEvent(taskId, { key: "verify_email" });
+await orchestrator.handleEvent(taskId, subtaskId, { key: "verify_email" });
 
 // Queries (inspect state)
-const currentState = await orchestrator.getTask(taskId);
-console.log(currentState.state.key);
+const task = await orchestrator.getTask(taskId);
+console.log(task.globalState.key);
 ```
 
 ## Performance Considerations
@@ -511,7 +368,7 @@ class DatabaseOrchestrator extends Orchestrator {
 
   protected async persistTaskState(task: ITask): Promise<void> {
     await this.db.tasks.update(task.id, {
-      state: task.state,
+      state: task.globalState,
       updatedAt: new Date(),
     });
   }
@@ -522,134 +379,38 @@ class DatabaseOrchestrator extends Orchestrator {
 }
 ```
 
-### External Service Integration
-
-```typescript
-class SlackMessenger extends Messenger<SlackMessage> {
-  constructor(private slackClient: SlackClient) {
-    super(["channel", "dm"]);
-  }
-
-  async send(messageKey: string, recipientRoles: string[]): Promise<void> {
-    const message = this.getMessage(messageKey);
-
-    for (const role of recipientRoles) {
-      if (role === "channel") {
-        await this.slackClient.postMessage(message.message);
-      } else if (role === "dm") {
-        await this.slackClient.sendDM(message.message);
-      }
-    }
-  }
-}
-```
-
 ## API Reference
 
-### Core Classes
-
-#### `Orchestrator`
-
-Abstract base class for workflow orchestration.
-
-**Methods:**
-
-- `registerWorkflow(workflow: Workflow): void`
-- `getWorkflows(): Workflow[]`
-- `getWorkflow(workflowKey: string): Workflow | undefined`
-- `initTask(workflowKey: string, initialData?: Record<string, any>): Promise<ITask>`
-- `getTasks(): Promise<ITask[]>`
-- `getTask(taskId: string): Promise<ITask | undefined | null>`
-- `handleEvent(taskId: string, event: IEvent): Promise<IInvocationLog[]>`
-
-#### `Workflow`
-
-Manages actions and state transitions within a workflow.
-
-**Methods:**
-
-- `setInitialStateData(data: Record<string, unknown>): void`
-- `initState(): void`
-- `getState(): IState | undefined`
-- `setState(state: IState): void`
-- `registerAction(action: Action): void`
-- `addTrigger(eventKey, action, condition?): void`
-- `handleEvent(event, messenger?): Promise<IActionLogData>`
-- `getActions(): Action[]`
-- `setTaskId(taskId: string): void`
-- `getTaskId(): string | undefined`
-
-#### `Action`
-
-Represents an atomic operation within a workflow.
-
-**Methods:**
-
-- `canBeInvoked(state: IState): TCanBeInvoked`
-- `invoke(state, taskId?, event?, messenger?): Promise<IActionLogData>`
-
-#### `Message<T>`
-
-Represents a message with key and payload.
-
-**Methods:**
-
-- `getKey(): string`
-- `getMessage(): T`
-- `toObject(): { key: string; message: T }`
-
-#### `Messenger<T>`
-
-Abstract base class for message delivery.
-
-**Methods:**
-
-- `registerMessage(message: Message<T>): void`
-- `getMessage(key: string): Message<T> | undefined`
-- `send(messageKey, recipientRoles): Promise<void>` (abstract)
-
-### Core Types
-
-#### `IState`
-
-```typescript
-interface IState {
-  key: string;
-  data: Record<string, any>;
-}
-```
-
-#### `ITask`
+### `ITask` & `ISubtask`
 
 ```typescript
 interface ITask {
   id: string;
+  globalState: IState;
+  subtasks: ISubtask[];
+}
+
+interface ISubtask {
+  id: string;
   workflowKey: string;
-  state: IState;
-  createdAt: Date;
+  localState: IState;
+  status: "active" | "completed";
 }
 ```
 
-#### `IEvent`
-
-```typescript
-interface IEvent {
-  key: TEventKey;
-  payload?: Record<string, any>;
-}
-```
-
-#### `IActionLogData`
+### `IActionLogData`
 
 ```typescript
 interface IActionLogData {
-  action_key?: string;
-  cost: number;
   success: boolean;
-  message?: string;
-  data?: Record<string, any>;
-  new_state?: IState;
-  emitEvent?: IEmitEvent;
+  new_state?: IState;        // Updates subtask local state
+  new_global_state?: IState; // Updates task global state
+  spawn_subtask?: { 
+    workflowKey: string; 
+    initialData?: Record<string, any> 
+  };
+  end_subtask?: boolean;     // Sets subtask status to completed
+  emitEvent?: { key: string };
 }
 ```
 

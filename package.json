@@ -31,6 +31,11 @@
     "prepare": "bun run build"
   },
   "dependencies": {
-    "uuid": "^13.0.0"
+    "@slack/web-api": "^7.15.1",
+    "@types/uuid": "^11.0.0",
+    "axios": "^1.15.0",
+    "facebook-nodejs-business-sdk": "^24.0.1",
+    "uuid": "^13.0.0",
+    "winston": "^3.19.0"
   }
 }

@@ -6,10 +6,16 @@
  *   import { Orchestrator, Memory, Messenger, Message, Action } from 'orchestrator';
  */
 
+/* Modules */
 export * from "./action/Action";
-
 export * from "./orchestrator";
-export { default as Orchestrator } from "./orchestrator";
+export * from "./messaging";
+
+/* Services (External Integrations) */
+export * from "./services";
+
+/* Webhooks */
+export * from "./webhooks/WebhookHandler";
 
 /* Types */
 export * from "./types";

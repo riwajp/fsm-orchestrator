@@ -5,11 +5,20 @@ import type { IState } from "../types/memory";
 import type { IEvent, ITask, ISubtask } from "../types";
 import type { IInvocationLog } from "../types/logs";
 
+/**
+ * The Orchestrator is the central engine of the library.
+ * It manages multiple workflows, tracks task instances, and handles event dispatching.
+ * Concrete implementations must provide persistence logic for states and logs.
+ */
 export abstract class Orchestrator {
+  /** Optional messaging system for external notifications (Slack, Email, etc.) */
   protected messenger?: Messenger<any>;
 
+  /** List of registered workflows available to the orchestrator */
   protected workflows: Workflow[] = [];
+  /** In-memory storage of active tasks (should be backed by persistTaskState in production) */
   protected tasks: ITask[] = [];
+  /** Log of all action invocations for audit and debugging */
   protected logs: IInvocationLog[] = [];
 
   /**
@@ -42,6 +51,10 @@ export abstract class Orchestrator {
 
   /* ---------- Workflow Management ---------- */
 
+  /**
+   * Registers a new workflow into the orchestrator.
+   * A single orchestrator can manage multiple distinct workflows.
+   */
   public registerWorkflow(workflow: Workflow): void {
     this.workflows.push(workflow);
   }
@@ -176,6 +189,8 @@ export abstract class Orchestrator {
       ];
     }
 
+    // Execute the action via the workflow
+    // It handles guard checks (canBeInvoked) and condition checks internally
     const result = await workflow.handleEvent(
       event,
       subtask.localState,
@@ -186,20 +201,20 @@ export abstract class Orchestrator {
     );
 
     if (result.success) {
-      // Update local state
+      // 1. Update the subtask's local state based on the action result
       subtask.localState = result.new_state ?? subtask.localState;
 
-      // Update global state if provided
+      // 2. Update the shared global state if the action provided a new version
       if (result.new_global_state) {
         task.globalState = result.new_global_state;
       }
 
-      // Handle subtask termination
+      // 3. Mark subtask as completed if requested by the action
       if (result.end_subtask) {
         subtask.status = "completed";
       }
 
-      // Handle subtask spawning
+      // 4. Handle spawning of new subtasks (Workflow Orchestration)
       if (result.spawn_subtask) {
         const spawnWorkflow = this.getWorkflow(result.spawn_subtask.workflowKey);
         if (spawnWorkflow) {
@@ -217,6 +232,7 @@ export abstract class Orchestrator {
         }
       }
 
+      // Persist the entire updated task structure
       await this.persistTaskState(task);
     }
 
